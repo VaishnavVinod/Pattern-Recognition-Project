@@ -1,1 +1,13 @@
+Dataset: Sports Classification
+Source: Kaggle
+Link: https://www.kaggle.com/datasets/gpiosenka/sports-classification
 
+Classes: 100 sport categories
+Total Images: ~13,493
+Split: Pre-partitioned train / valid / test directories
+Image Type: RGB JPEG
+Image Size: 224 x 224 pixels
+
+To use this dataset:
+1. Go to the Kaggle link above
+2. Click Download or use it directly in a Kaggle Notebook
