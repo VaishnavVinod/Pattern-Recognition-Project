@@ -43,13 +43,18 @@ print(f"GPU available: {tf.config.list_physical_devices('GPU')}")
 # 2. CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────
 # ── Dataset root (Kaggle path) ──────────────────────────────────────
-# When running on Kaggle, the dataset is at /kaggle/input/sports-classification/
-# Adjust DATA_ROOT if running locally.
-DATA_ROOT  = "/kaggle/input/sports-classification"
+# On Kaggle, the gpiosenka dataset mounts at the path below.
+# If running elsewhere, change DATA_ROOT accordingly.
+DATA_ROOT = "/kaggle/input/datasets/gpiosenka/sports-classification"
 
-TRAIN_DIR  = os.path.join(DATA_ROOT, "train")
-VAL_DIR    = os.path.join(DATA_ROOT, "valid")
-TEST_DIR   = os.path.join(DATA_ROOT, "test")
+TRAIN_DIR = os.path.join(DATA_ROOT, "train")
+VAL_DIR   = os.path.join(DATA_ROOT, "valid")
+TEST_DIR  = os.path.join(DATA_ROOT, "test")
+
+# Fail fast with a clear message if the path is wrong on a future run
+assert os.path.isdir(TRAIN_DIR), f"TRAIN_DIR not found: {TRAIN_DIR}"
+assert os.path.isdir(VAL_DIR),   f"VAL_DIR not found: {VAL_DIR}"
+assert os.path.isdir(TEST_DIR),  f"TEST_DIR not found: {TEST_DIR}"
 
 IMG_SIZE   = (224, 224)   # Required by EfficientNetB0 / MobileNetV2
 BATCH_SIZE = 32
@@ -272,10 +277,21 @@ history_eff = eff_model.fit(
 )
 
 # ── Fine-tuning: unfreeze top 30 layers ─────────────────────────────
+# FIX: locate the EfficientNet base by type instead of a hard-coded
+# layer index. The base is itself a nested Model, so we search for the
+# first Model instance among the layers. This avoids an AttributeError
+# that would otherwise crash AFTER the 20 frozen-base epochs complete.
 print("\nFine-tuning EfficientNetB0 (unfreezing top 30 layers)…")
-base_eff = eff_model.layers[3]   # The EfficientNetB0 base layer
+base_eff = None
+for layer in eff_model.layers:
+    if isinstance(layer, Model):       # the EfficientNetB0 base is a Model
+        base_eff = layer
+        break
+assert base_eff is not None, "Could not locate the EfficientNet base model."
+print(f"Located base model: {base_eff.name} with {len(base_eff.layers)} layers")
+
 base_eff.trainable = True
-for layer in base_eff.layers[:-30]:
+for layer in base_eff.layers[:-30]:    # keep all but the top 30 frozen
     layer.trainable = False
 
 eff_model.compile(
@@ -582,10 +598,24 @@ for i, img_path in enumerate(sample_imgs[:4]):
 # ─────────────────────────────────────────────────────────────────────
 
 def plot_macro_roc(y_true, y_prob, class_names, model_name, save_path=None):
-    """Plot macro-average ROC curve."""
-    y_bin = label_binarize(y_true, classes=list(range(len(class_names))))
+    """Plot macro-average ROC curve and report macro AUC."""
+    n_classes = len(class_names)
+    y_bin = label_binarize(y_true, classes=list(range(n_classes)))
+
+    # Micro-style curve for the plotted line (flattened one-vs-rest)
     fpr, tpr, _ = roc_curve(y_bin.ravel(), y_prob.ravel())
-    auc = roc_auc_score(y_bin, y_prob, average="macro", multi_class="ovr")
+
+    # FIX: compute macro AUC directly from the binarised matrix.
+    # Passing multi_class with an already-binarised 2D target can raise;
+    # using the indicator matrix with average="macro" is the safe form.
+    # Guard against any class that has no positive samples in the test set.
+    try:
+        auc = roc_auc_score(y_bin, y_prob, average="macro")
+    except ValueError:
+        # Fall back: average AUC only over classes that are present
+        present = np.where(y_bin.sum(axis=0) > 0)[0]
+        auc = roc_auc_score(y_bin[:, present], y_prob[:, present],
+                            average="macro")
 
     plt.figure(figsize=(8, 6))
     plt.plot(fpr, tpr, color="darkorange", lw=2,
@@ -656,4 +686,4 @@ with open(summary_path, "w") as f:
     f.write("\n\nAll output figures saved to: " + OUTPUT_DIR)
 
 print(f"\nAll outputs saved to: {OUTPUT_DIR}")
-print("Done! ✓")
+print("Done! \u2713")
